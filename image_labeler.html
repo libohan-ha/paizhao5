@@ -1,0 +1,106 @@
+function drawLabelsOnImage(objects) {
+    const canvas = document.getElementById('labeledImage');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = originalImage.width;
+    canvas.height = originalImage.height;
+    ctx.drawImage(originalImage, 0, 0);
+
+    // 计算缩放比例
+    const displayToCanvasRatio = canvas.width / canvas.offsetWidth;
+    const scale = Math.max(1, window.innerWidth / 500);
+    
+    // 标签样式
+    const style = {
+        width: 300 * scale,
+        height: 120 * scale,
+        fontSize: 48 * scale,
+        padding: 20 * scale
+    };
+
+    let activeLabel = null;
+    let startX = 0;
+    let startY = 0;
+
+    // 初始化标签
+    let labels = objects.map(obj => ({
+        cn: obj.name_cn,
+        en: obj.name_en,
+        x: obj.position.x - style.width/2,
+        y: obj.position.y - style.height/2,
+        width: style.width,
+        height: style.height
+    }));
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(originalImage, 0, 0);
+
+        labels.forEach(label => {
+            // 背景
+            ctx.fillStyle = 'white';
+            ctx.fillRect(label.x, label.y, label.width, label.height);
+
+            // 中文
+            ctx.font = `bold ${style.fontSize}px sans-serif`;
+            ctx.fillStyle = 'black';
+            ctx.fillText(label.cn, label.x + style.padding, label.y + style.fontSize);
+
+            // 英文
+            ctx.font = `${style.fontSize * 0.8}px sans-serif`;
+            ctx.fillStyle = '#666';
+            ctx.fillText(label.en, label.x + style.padding, label.y + style.fontSize * 1.8);
+        });
+    }
+
+    function getCanvasPoint(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: (clientX - rect.left) * displayToCanvasRatio,
+            y: (clientY - rect.top) * displayToCanvasRatio
+        };
+    }
+
+    canvas.ontouchstart = function(e) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const point = getCanvasPoint(touch.clientX, touch.clientY);
+
+        for (let i = labels.length - 1; i >= 0; i--) {
+            const label = labels[i];
+            if (point.x >= label.x && point.x <= label.x + label.width &&
+                point.y >= label.y && point.y <= label.y + label.height) {
+                activeLabel = label;
+                startX = point.x - label.x;
+                startY = point.y - label.y;
+                break;
+            }
+        }
+    };
+
+    canvas.ontouchmove = function(e) {
+        e.preventDefault();
+        if (activeLabel) {
+            const touch = e.touches[0];
+            const point = getCanvasPoint(touch.clientX, touch.clientY);
+            activeLabel.x = point.x - startX;
+            activeLabel.y = point.y - startY;
+            draw();
+        }
+    };
+
+    canvas.ontouchend = function(e) {
+        e.preventDefault();
+        activeLabel = null;
+    };
+
+    canvas.ontouchcancel = function(e) {
+        e.preventDefault();
+        activeLabel = null;
+    };
+
+    // 初始绘制
+    draw();
+    canvas.style.display = 'block';
+    document.getElementById('uploadedImage').style.display = 'none';
+} 

@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="zh">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>拍照学单词</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background: linear-gradient(135deg, #00f260, #0575E6);
+            color: #333;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            background-color: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+            border-radius: 15px;
+            padding: 40px;
+            width: 80%;
+            max-width: 800px;
+            text-align: center;
+            color: #fff;
+        }
+
+        .image-container {
+            margin: 20px 0;
+            position: relative;
+            display: inline-block;
+        }
+
+        #uploadedImage,
+        #labeledImage {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+        }
+
+        button {
+            width: 200px;
+            padding: 12px;
+            background-color: #00f260;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            color: #fff;
+            cursor: pointer;
+            transition: background-color 0.3s ease-in-out;
+            margin: 10px;
+        }
+
+        button:hover {
+            background-color: #0575E6;
+        }
+
+        .progress-bar {
+            width: 100%;
+            background-color: rgba(255, 255, 255, 0.2);
+            border-radius: 25px;
+            overflow: hidden;
+            height: 20px;
+            margin: 20px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0;
+            background: linear-gradient(135deg, #00f260, #0575E6);
+            transition: width 0.3s ease-in-out;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h2>拍照学单词</h2>
+        <input type="file" id="imageInput" accept="image/*">
+        <button id="analyzeButton">开始分析</button>
+
+        <div class="image-container">
+            <img id="uploadedImage" style="display: none;">
+            <canvas id="labeledImage" style="display: none;"></canvas>
+        </div>
+
+        <div class="progress-bar">
+            <div class="progress-fill"></div>
+        </div>
+    </div>
+
+    <script>
+        const apiKey = "sk-wkJ8C4yXkzkXiwUm2e0322A6Bf254239824bC7D6F91a3468";
+        let originalImage = null;
+
+        document.getElementById('imageInput').addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (file) {
+                if (!file.type.startsWith('image/')) {
+                    alert('请选择有效的图片文件');
+                    return;
+                }
+                
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    const img = document.getElementById('uploadedImage');
+                    img.onload = function() {
+                        originalImage = new Image();
+                        originalImage.src = img.src;
+                    };
+                    img.src = e.target.result;
+                    img.style.display = 'block';
+                    document.getElementById('labeledImage').style.display = 'none';
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        document.getElementById('analyzeButton').addEventListener('click', async function () {
+            const img = document.getElementById('uploadedImage');
+            if (!img.src) {
+                alert('请先选择图片');
+                return;
+            }
+
+            const base64Image = img.src.split(',')[1];
+            const progressFill = document.querySelector('.progress-fill');
+
+            const payload = {
+                model: "gpt-4o",
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "text",
+                                text: "请识别图片中的所有物体，并返回JSON格式，包含物体的中英文名称和位置信息。格式：[{\"name_cn\":\"物体中文\",\"name_en\":\"物体英文\",\"position\":{\"x\":100,\"y\":200}}]"
+                            },
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: `data:image/jpeg;base64,${base64Image}`
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens: 500
+            };
+
+            try {
+                progressFill.style.width = '50%';
+
+                const response = await fetch('https://xiaoai.plus/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(`API Error: ${JSON.stringify(data)}`);
+                }
+                
+                if (!data.choices || !data.choices[0] || !data.choices[0].message || !data.choices[0].message.content) {
+                    throw new Error(`Invalid response format: ${JSON.stringify(data)}`);
+                }
+
+                let objects;
+                try {
+                    const content = data.choices[0].message.content.trim();
+                    // 尝试提取 JSON 字符串
+                    const jsonMatch = content.match(/\[.*\]/s);
+                    if (jsonMatch) {
+                        objects = JSON.parse(jsonMatch[0]);
+                    } else {
+                        objects = JSON.parse(content);
+                    }
+                    
+                    if (!Array.isArray(objects)) {
+                        throw new Error('Response is not an array');
+                    }
+                    
+                    // 确保每个对象都有正确的属性和类型
+                    objects = objects.map(obj => ({
+                        name_cn: String(obj.name_cn || ''),
+                        name_en: String(obj.name_en || ''),
+                        position: {
+                            x: Number(obj.position?.x || 0),
+                            y: Number(obj.position?.y || 0)
+                        }
+                    })).filter(obj => 
+                        obj.name_cn && 
+                        obj.name_en && 
+                        !isNaN(obj.position.x) && 
+                        !isNaN(obj.position.y)
+                    );
+                    
+                    if (objects.length === 0) {
+                        throw new Error('No valid objects found in response');
+                    }
+                    
+                    drawLabelsOnImage(objects);
+                    progressFill.style.width = '100%';
+                } catch (error) {
+                    console.error('JSON parsing error:', error);
+                    alert('无法解析识别结果，请重试');
+                    progressFill.style.width = '0%';
+                }
+            } catch (error) {
+                console.error('Detailed error:', error);
+                alert(`分析过程中出现错误: ${error.message}`);
+                progressFill.style.width = '0%';
+            }
+        });
+
+        function drawLabelsOnImage(objects) {
+            const canvas = document.getElementById('labeledImage');
+            const ctx = canvas.getContext('2d');
+
+            canvas.width = originalImage.width;
+            canvas.height = originalImage.height;
+            ctx.drawImage(originalImage, 0, 0);
+
+            let dragging = false;
+            let selected = null;
+            let offsetX = 0;
+            let offsetY = 0;
+
+            // 初始化标签，位置更靠近物体
+            let labels = objects.map(obj => ({
+                cn: obj.name_cn,
+                en: obj.name_en,
+                x: obj.position.x - 80,    // 减小偏移距离
+                y: obj.position.y - 45,    // 垂直居中
+                width: 160,                // 减小宽度
+                height: 85                 // 减小高度
+            }));
+
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(originalImage, 0, 0);
+
+                labels.forEach(label => {
+                    // 绘制背景
+                    ctx.save();
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+                    ctx.shadowBlur = 10;
+                    ctx.shadowOffsetY = 2;
+                    
+                    // 绘制圆角矩形背景
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+                    ctx.beginPath();
+                    ctx.roundRect(label.x, label.y, label.width, label.height, 12);
+                    ctx.fill();
+                    ctx.restore();
+
+                    // 绘制中文文本
+                    ctx.font = '500 28px -apple-system, "SF Pro Display", "PingFang SC"';
+                    ctx.fillStyle = '#000000';
+                    ctx.fillText(label.cn, label.x + 12, label.y + 32);
+                    
+                    // 绘制英文文本
+                    ctx.font = '400 24px -apple-system, "SF Pro Display"';
+                    ctx.fillStyle = '#666666';
+                    ctx.fillText(label.en, label.x + 12, label.y + 65);
+                });
+            }
+
+            function mouseDown(e) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                for (let i = labels.length - 1; i >= 0; i--) {
+                    const label = labels[i];
+                    if (x >= label.x && x <= label.x + label.width &&
+                        y >= label.y && y <= label.y + label.height) {
+                        dragging = true;
+                        selected = label;
+                        offsetX = x - label.x;
+                        offsetY = y - label.y;
+                        break;
+                    }
+                }
+            }
+
+            function mouseMove(e) {
+                if (dragging && selected) {
+                    const rect = canvas.getBoundingClientRect();
+                    selected.x = e.clientX - rect.left - offsetX;
+                    selected.y = e.clientY - rect.top - offsetY;
+                    draw();
+                }
+            }
+
+            function mouseUp() {
+                dragging = false;
+                selected = null;
+            }
+
+            canvas.addEventListener('mousedown', mouseDown);
+            canvas.addEventListener('mousemove', mouseMove);
+            canvas.addEventListener('mouseup', mouseUp);
+            canvas.addEventListener('mouseleave', mouseUp);
+
+            // 初始绘制
+            draw();
+            canvas.style.display = 'block';
+            document.getElementById('uploadedImage').style.display = 'none';
+        }
+    </script>
+</body>
+
+</html>
